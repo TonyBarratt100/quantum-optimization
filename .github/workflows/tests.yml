@@ -40,4 +40,6 @@ jobs:
       - run: pip install -e ".[dev]"
       - run: pytest -q
       - name: Demo runs end to end, through the installed command
-        run: qaoa-maxcut --no-plot
+        run: |
+          qaoa-maxcut --no-plot
+          qaoa-maxcut --backend fake_marrakesh --layers 1 --restarts 2 --shots 500 --no-plot

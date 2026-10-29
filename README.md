@@ -26,6 +26,7 @@ represent better answers.
 |---|---|
 | [`qaoa_maxcut/graphs.py`](qaoa_maxcut/graphs.py) | Weighted graphs, cut values, brute-force MaxCut, and example graphs |
 | [`qaoa_maxcut/qaoa.py`](qaoa_maxcut/qaoa.py) | The QAOA circuit, a fast NumPy simulation of it, the angle optimiser, and sampling on `AerSimulator` |
+| [`qaoa_maxcut/hardware.py`](qaoa_maxcut/hardware.py) | Sampling the optimised circuits on an IBM quantum computer (real or fake), with readout correction |
 | [`qaoa_maxcut/__main__.py`](qaoa_maxcut/__main__.py) | Command-line demo that prints the results table and saves the plot |
 | [`tests/`](tests) | pytest checks covering the graph maths, the physics, and the demo |
 
@@ -69,6 +70,50 @@ number of nodes, *p* = 1 reaches exactly 3/4 of the maximum cut.
   times faster than simulating the circuit. A test checks that the two give the same state.
 - **Sampling:** the optimised circuit is run on `AerSimulator`, and the best measured
   bitstring is the answer.
+
+## Running on IBM quantum hardware
+
+QAOA is a hybrid algorithm: a classical computer tunes the angles and a quantum computer
+prepares and measures the state. Here the tuning is done exactly on your laptop, and only
+the final measurements go to the quantum computer, which keeps quota use to seconds.
+
+Try IBM's *fake* Marrakesh first: a local copy of the real device's qubit layout, native
+gates and measured noise, which needs no account and costs nothing.
+
+```bash
+pip install -e ".[ibm]"
+qaoa-maxcut --backend fake_marrakesh
+qaoa-maxcut --backend least-busy
+```
+
+The second command uses a real IBM quantum computer. It needs a free
+[IBM Quantum Platform](https://quantum.cloud.ibm.com) account with your API key saved
+(see the [quantum-error-mitigation](https://github.com/TonyBarratt100/quantum-error-mitigation)
+README), and it asks before using any quota: one job of 5 circuits x 4,000 shots by default.
+
+On fake Marrakesh (4,000 shots):
+
+| p | Two-qubit gates on the chip | P(max cut), exact | P(max cut), measured | Measured, readout-corrected |
+|---|---|---|---|---|
+| 1 | 31 | 0.401 | 0.384 | 0.395 |
+| 2 | 69 | 0.721 | 0.629 | 0.648 |
+| 3 | 111 | 0.933 | 0.756 | 0.781 |
+
+This shows the trade-off that matters on real hardware: each extra layer gets closer to
+the best cut in theory, but adds about 40 more two-qubit gates, and each gate adds noise.
+On this device model depth still wins at p = 3, but by less than the exact simulation
+promises. A real chip may show the gains levelling off sooner.
+
+How it works:
+
+- **Readout correction.** Two calibration circuits, all |0> and all |1>, run in the same
+  job on every qubit the QAOA circuits measure, and each measured bit is corrected for its
+  own qubit's readout error.
+- **Quiet qubits.** The prism graph contains triangles, which IBM's heavy-hex chips do not,
+  so the circuits need SWAP gates to route around the chip. Qiskit's transpiler is run with
+  8 seeds, and the version with the lowest expected error, from the device's published
+  error rates, is kept.
+- **Raw results.** IBM's own twirling and dynamical decoupling are switched off.
 
 ## Getting started
 
@@ -121,7 +166,10 @@ print(best_sampled_cut(graph, sample(graph, result, shots=1000, seed=1)))
 - Compare with the classical Goemans–Williamson algorithm (guaranteed ratio 0.878)
 - Weighted and random graphs at larger sizes, and warm-starting deeper circuits from
   shallower ones
-- Add a noise model, and run on IBM Quantum hardware via `qiskit-ibm-runtime`
+- Combine hardware sampling with zero-noise extrapolation from the
+  [quantum-error-mitigation](https://github.com/TonyBarratt100/quantum-error-mitigation) repo
+- Use IBM's native fractional RZZ gates on Heron chips, which could substantially reduce the
+  two-qubit gate count
 
 ## Licence
 
