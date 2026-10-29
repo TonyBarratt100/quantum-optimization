@@ -4,6 +4,8 @@ __pycache__/
 .venv/
 .pytest_cache/
 .ruff_cache/
+.mypy_cache/
+.coverage
 *.egg-info/
 
 # Jupyter
@@ -15,3 +17,6 @@ __pycache__/
 # Secrets (e.g. IBM Quantum API tokens)
 .env
 qiskit-ibm.json
+
+# Demo output (the README image lives in docs/)
+/qaoa_maxcut.png

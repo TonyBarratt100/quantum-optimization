@@ -15,10 +15,10 @@ for quantum optimisation.
 **QAOA:** a short circuit with two kinds of layer. A *cost* layer gives each candidate
 split a phase proportional to its cut value. A *mixer* layer lets the candidates interfere.
 A classical optimiser tunes the layer angles so that good cuts interfere constructively, and
-measuring the circuit then returns good cuts with high probability. More layers (*p*) give
-better answers.
+measuring the circuit then returns good cuts with high probability. More layers (*p*) can
+represent better answers.
 
-![QAOA on the prism graph](qaoa_maxcut.png)
+![QAOA on the prism graph](docs/qaoa_maxcut.png)
 
 ## What's here
 
@@ -34,7 +34,7 @@ better answers.
 The demo graph is the 6-node, 9-edge *prism* (two triangles joined by three edges). Its
 maximum cut is 7. A random split cuts 4.5 edges on average.
 
-`python -m qaoa_maxcut`, 10 optimiser restarts and 1,000 shots per depth:
+`qaoa-maxcut` (or `python -m qaoa_maxcut`), 10 optimiser restarts and 1,000 shots per depth:
 
 | p | Expected cut | Approximation ratio | P(max cut), exact | P(max cut), sampled |
 |---|---|---|---|---|
@@ -44,6 +44,13 @@ maximum cut is 7. A random split cuts 4.5 edges on average.
 
 With three layers, about 93% of measurements return an optimal cut. The sampled
 frequencies agree with the exact statevector values to within shot noise.
+
+Two honest caveats. First, this is a classical simulation of QAOA on a 6-node graph, which a
+laptop solves instantly by brute force, so it demonstrates how the algorithm works, not a
+quantum speed-up. Second, extra layers make better states *possible*, but the optimiser is a
+local search: on a given run a deeper circuit can occasionally score lower than a shallower
+one. More restarts (`--restarts`) make that less likely, and each result reports whether the
+optimiser converged.
 
 As a physics check, the tests reproduce a known result from the original QAOA paper
 ([Farhi, Goldstone and Gutmann, 2014](https://arxiv.org/abs/1411.4028)): on a ring with an even
@@ -72,16 +79,17 @@ git clone https://github.com/TonyBarratt100/quantum-optimization.git
 cd quantum-optimization
 python3 -m venv .venv
 source .venv/bin/activate
-pip install -r requirements-dev.txt   # or requirements.txt for just the code
+pip install -e ".[dev]"   # the package, plus pytest, ruff and mypy
 ```
 
 Run the demo and the checks:
 
 ```bash
-python -m qaoa_maxcut                   # results table, and saves qaoa_maxcut.png
-python -m qaoa_maxcut --layers 1 2 3 4  # try other depths (see --help)
+qaoa-maxcut                             # results table, and saves qaoa_maxcut.png
+qaoa-maxcut --layers 1 2 3 4            # try other depths (see --help)
 pytest -q                               # run the tests
 ruff check . && ruff format --check .   # lint and formatting
+mypy                                    # type checking
 ```
 
 Use it from Python:
@@ -97,10 +105,16 @@ print(best_sampled_cut(graph, sample(graph, result, shots=1000, seed=1)))
 
 ## Coding standards
 
-- Package layout with type hints and docstrings on every public function
-- Input validation with clear error messages, and seeds for reproducible runs
-- [Ruff](https://docs.astral.sh/ruff/) lint and formatting rules in `pyproject.toml`
-- GitHub Actions runs lint, the tests on Python 3.11–3.14, and the demo on every push
+- An installable package (`pyproject.toml` is the single list of dependencies), with a
+  `qaoa-maxcut` command
+- Type hints and docstrings on every function, checked by [mypy](https://mypy-lang.org/)
+- Input validation with clear error messages: malformed graphs and counts fail loudly
+  instead of quietly becoming a different problem
+- Seeds for reproducible runs
+- [Ruff](https://docs.astral.sh/ruff/) lint and formatting, with the tool versions pinned
+- GitHub Actions installs the package, then runs lint, type checks, the tests on
+  Python 3.11–3.14, and the demo on every push. Actions are pinned to exact commits, and
+  the workflow can only read the repository
 
 ## Next steps
 

@@ -19,6 +19,7 @@ from .graphs import (
     cut_value,
     cut_values,
     example_graph,
+    optimal_mask,
 )
 from .qaoa import QAOAResult, best_sampled_cut, optimize, sample, state_probabilities
 
@@ -58,14 +59,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         result = optimize(graph, layers, restarts=args.restarts, seed=args.seed)
         counts = sample(graph, result, shots=args.shots, seed=args.seed)
         best_cut, _ = best_sampled_cut(graph, counts)
-        hits = (
-            sum(
-                n
-                for bits, n in counts.items()
-                if np.isclose(cut_value(graph, assignment_from_bitstring(bits)), max_cut)
-            )
-            / args.shots
-        )
+        sampled_cuts = np.array([cut_value(graph, assignment_from_bitstring(bits)) for bits in counts])
+        shot_counts = np.array(list(counts.values()))
+        hits = shot_counts[optimal_mask(sampled_cuts, max_cut)].sum() / args.shots
         print(
             f"{layers:>2}  {result.expected_cut:>6.3f}  {result.approximation_ratio:>6.3f}  "
             f"{result.optimal_probability:>12.3f}  {hits:>14.3f}  {best_cut:>12g}"

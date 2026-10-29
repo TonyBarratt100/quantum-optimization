@@ -13,20 +13,26 @@ requires-python = ">=3.11"
 dependencies = [
     "qiskit>=2.6,<3",
     "qiskit-aer>=0.18,<0.19",
-    "numpy>=2.0",
-    "scipy>=1.13",
-    "matplotlib>=3.9",
+    "numpy>=2.0,<3",
+    "scipy>=1.13,<2",
+    "matplotlib>=3.9,<4",
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=8.0", "ruff>=0.16,<0.17"]
+# Linters are pinned exactly, so a new release can never break CI by changing its rules
+dev = ["pytest>=8.0,<10", "ruff==0.17.3", "mypy==2.4.1"]
+
+[project.scripts]
+qaoa-maxcut = "qaoa_maxcut.__main__:main"
 
 [tool.setuptools]
 packages = ["qaoa_maxcut"]
 
+[tool.setuptools.package-data]
+qaoa_maxcut = ["py.typed"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-pythonpath = ["."]
 addopts = "-ra"
 
 [tool.ruff]
@@ -40,3 +46,16 @@ allowed-confusables = ["–"]
 
 [tool.ruff.lint.per-file-ignores]
 "tests/*" = ["N802"]
+
+[tool.mypy]
+python_version = "3.11"
+files = ["qaoa_maxcut"]
+strict_optional = true
+warn_unused_ignores = true
+warn_redundant_casts = true
+disallow_untyped_defs = true
+
+[[tool.mypy.overrides]]
+# Qiskit, Qiskit Aer and SciPy ship without type information
+module = ["qiskit.*", "qiskit_aer.*", "scipy.*"]
+ignore_missing_imports = true

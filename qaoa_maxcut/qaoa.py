@@ -15,8 +15,9 @@ phase, exp(-i gamma w (1 - Z_i Z_j) / 2) = RZZ(-gamma w), and exp(-i beta X) = R
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
+from numbers import Real
 
 import numpy as np
 from qiskit import QuantumCircuit, transpile
@@ -24,12 +25,25 @@ from qiskit.circuit import Parameter, ParameterVector
 from qiskit_aer import AerSimulator
 from scipy.optimize import minimize
 
-from .graphs import Graph, assignment_from_bitstring, brute_force_max_cut, cut_value, cut_values
+from .graphs import (
+    OPTIMAL_RTOL,
+    Graph,
+    assignment_from_bitstring,
+    brute_force_max_cut,
+    cut_value,
+    cut_values,
+    optimal_mask,
+)
 
 
 @dataclass(frozen=True)
 class QAOAResult:
-    """Outcome of optimising the QAOA angles for one graph and one number of layers."""
+    """Outcome of optimising the QAOA angles for one graph and one number of layers.
+
+    ``converged`` and ``optimizer_message`` describe the best of the random restarts, and
+    ``restarts_converged`` says how many restarts met the optimiser's convergence test. The
+    best run is kept even if it did not converge, since its angles are still the best found.
+    """
 
     layers: int
     gammas: tuple[float, ...]
@@ -38,6 +52,9 @@ class QAOAResult:
     max_cut: float
     optimal_probability: float
     evaluations: int
+    converged: bool = True
+    optimizer_message: str = ""
+    restarts_converged: int = 1
 
     @property
     def approximation_ratio(self) -> float:
@@ -53,6 +70,9 @@ def qaoa_circuit(graph: Graph, layers: int, measure: bool = False) -> QuantumCir
     """
     if layers < 1:
         raise ValueError(f"layers must be at least 1, got {layers}")
+    if graph.total_weight == 0:
+        # With no weighted edges the gamma parameters would vanish from the circuit
+        raise ValueError("graph has no edges with positive weight, so there is nothing to optimise")
     gammas = ParameterVector("gamma", layers)
     betas = ParameterVector("beta", layers)
 
@@ -73,6 +93,8 @@ def bind_angles(circuit: QuantumCircuit, gammas: Sequence[float], betas: Sequenc
     if len(gammas) != layers or len(betas) != layers:
         raise ValueError(f"expected {layers} gammas and {layers} betas, got {len(gammas)} and {len(betas)}")
     angles = [float(a) for a in (*gammas, *betas)]
+    if not all(np.isfinite(angles)):
+        raise ValueError("angles must be finite numbers")
     return circuit.assign_parameters(dict(zip(_ordered_parameters(circuit), angles, strict=True)))
 
 
@@ -87,6 +109,8 @@ def qaoa_statevector(graph: Graph, gammas: Sequence[float], betas: Sequence[floa
         raise ValueError(f"got {len(gammas)} gammas but {len(betas)} betas")
     if len(gammas) == 0:
         raise ValueError("need at least one layer of angles")
+    if not (np.all(np.isfinite(gammas)) and np.all(np.isfinite(betas))):
+        raise ValueError("angles must be finite numbers")
     return _evolve(cut_values(graph), graph.num_nodes, gammas, betas)
 
 
@@ -106,6 +130,7 @@ def optimize(
     restarts: int = 10,
     seed: int | None = None,
     maxiter: int = 1000,
+    optimal_rtol: float = OPTIMAL_RTOL,
 ) -> QAOAResult:
     """Find angles that maximise the expected cut, using L-BFGS-B from several random starts.
 
@@ -113,17 +138,26 @@ def optimize(
     returned. Starting angles are drawn from gamma in [0, pi) and beta in [0, pi/2);
     shifting any beta by pi/2 only swaps the two groups, so that range loses
     nothing. Objective evaluations use the fast NumPy simulation, not the circuit.
+
+    ``optimal_probability`` counts only assignments whose cut equals the maximum, up to
+    ``optimal_rtol`` relative rounding error.
+
+    More layers can represent better states, but a finite local search is not guaranteed to
+    find them on every run, so a deeper circuit can occasionally score lower than a
+    shallower one. More restarts make that less likely.
     """
     if layers < 1:
         raise ValueError(f"layers must be at least 1, got {layers}")
     if restarts < 1:
         raise ValueError(f"restarts must be at least 1, got {restarts}")
+    if maxiter < 1:
+        raise ValueError(f"maxiter must be at least 1, got {maxiter}")
     if graph.total_weight == 0:
         raise ValueError("graph has no edges with positive weight, so every cut is 0")
 
     values = cut_values(graph)
     max_cut, _ = brute_force_max_cut(graph)
-    optimal = np.isclose(values, max_cut)
+    optimal = optimal_mask(values, max_cut, optimal_rtol)
     rng = np.random.default_rng(seed)
     evaluations = 0
 
@@ -139,7 +173,10 @@ def optimize(
     for _ in range(restarts):
         start = np.concatenate([rng.uniform(0, np.pi, layers), rng.uniform(0, np.pi / 2, layers)])
         runs.append(minimize(negative_expected_cut, start, method="L-BFGS-B", options={"maxiter": maxiter}))
-    best = min(runs, key=lambda run: run.fun)
+    finite_runs = [run for run in runs if np.isfinite(run.fun)]
+    if not finite_runs:
+        raise RuntimeError("every optimiser run failed to produce a finite result")
+    best = min(finite_runs, key=lambda run: run.fun)
     best_x, best_value = best.x, -float(best.fun)
 
     return QAOAResult(
@@ -150,6 +187,9 @@ def optimize(
         max_cut=max_cut,
         optimal_probability=float(probabilities(best_x)[optimal].sum()),
         evaluations=evaluations,
+        converged=bool(best.success),
+        optimizer_message=str(best.message),
+        restarts_converged=sum(bool(run.success) for run in runs),
     )
 
 
@@ -163,17 +203,26 @@ def sample(graph: Graph, result: QAOAResult, shots: int = 1000, seed: int | None
     return job.result().get_counts()
 
 
-def best_sampled_cut(graph: Graph, counts: dict[str, int]) -> tuple[float, list[int]]:
-    """The best cut found among the measured bitstrings."""
-    if not counts:
-        raise ValueError("counts is empty")
-    assignments = (assignment_from_bitstring(bits) for bits in counts)
+def best_sampled_cut(graph: Graph, counts: Mapping[str, int]) -> tuple[float, list[int]]:
+    """The best cut among bitstrings that were actually measured (count above zero)."""
+    for bits, count in counts.items():
+        if len(bits) != graph.num_nodes:
+            raise ValueError(f"bitstring {bits!r} does not have {graph.num_nodes} bits")
+        if isinstance(count, bool) or not isinstance(count, Real) or not np.isfinite(count) or count < 0:
+            raise ValueError(f"counts must be finite and non-negative, got {count!r} for {bits!r}")
+    observed = [bits for bits, count in counts.items() if count > 0]
+    if not observed:
+        raise ValueError("no outcome was observed (all counts are zero, or counts is empty)")
+    assignments = (assignment_from_bitstring(bits) for bits in observed)
     best = max(assignments, key=lambda a: cut_value(graph, a))
     return cut_value(graph, best), best
 
 
 def _evolve(
-    values: np.ndarray, num_qubits: int, gammas: Sequence[float], betas: Sequence[float]
+    values: np.ndarray,
+    num_qubits: int,
+    gammas: Sequence[float] | np.ndarray,
+    betas: Sequence[float] | np.ndarray,
 ) -> np.ndarray:
     """Apply the QAOA layers to |+>^n, given the precomputed cut value of every basis state."""
     state = np.full(2**num_qubits, 2 ** (-num_qubits / 2), dtype=complex)  # |+>^n

@@ -1,3 +1,2 @@
--r requirements.txt
-pytest>=8.0
-ruff>=0.16,<0.17
+# The package plus the test and lint tools pinned in pyproject.toml.
+-e .[dev]

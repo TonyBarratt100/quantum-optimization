@@ -2,7 +2,7 @@ import numpy as np
 import pytest
 from qiskit.quantum_info import Statevector
 
-from qaoa_maxcut.graphs import Graph, brute_force_max_cut, example_graph, random_graph, ring
+from qaoa_maxcut.graphs import Graph, brute_force_max_cut, cut_values, example_graph, random_graph, ring
 from qaoa_maxcut.qaoa import (
     best_sampled_cut,
     bind_angles,
@@ -122,3 +122,44 @@ def test_optimize_rejects_bad_input():
         optimize(ring(4), layers=1, restarts=0)
     with pytest.raises(ValueError, match="layers"):
         optimize(ring(4), layers=0)
+
+
+def test_nearly_equal_weights_are_not_counted_as_optimal():
+    """Only the true maximum cuts count, not cuts that are merely close to it."""
+    graph = Graph.from_edges(3, [(0, 1, 1.0), (1, 2, 1.0), (0, 2, 1.000001)])
+    result = optimize(graph, layers=1, restarts=2, seed=0)
+    probs = state_probabilities(graph, result.gammas, result.betas)
+    values = cut_values(graph)
+    exact = probs[values == values.max()].sum()
+    assert result.optimal_probability == pytest.approx(exact)
+    assert result.optimal_probability < 0.9  # it was wrongly ~1.0 with np.isclose
+
+
+def test_best_sampled_cut_ignores_outcomes_that_were_never_observed():
+    graph = Graph.from_edges(2, [(0, 1)])
+    assert best_sampled_cut(graph, {"00": 10, "01": 0}) == (0, [0, 0])
+    with pytest.raises(ValueError, match="no outcome"):
+        best_sampled_cut(graph, {"01": 0})
+    with pytest.raises(ValueError, match="no outcome"):
+        best_sampled_cut(graph, {})
+    with pytest.raises(ValueError, match="non-negative"):
+        best_sampled_cut(graph, {"00": 5, "01": -1})
+    with pytest.raises(ValueError, match="2 bits"):
+        best_sampled_cut(graph, {"001": 5})
+
+
+def test_result_reports_optimizer_convergence(prism_p3):
+    assert prism_p3.converged
+    assert 1 <= prism_p3.restarts_converged <= 5
+    assert prism_p3.optimizer_message
+
+
+def test_edgeless_graphs_and_non_finite_angles_are_rejected():
+    with pytest.raises(ValueError, match="positive weight"):
+        qaoa_circuit(Graph.from_edges(3, []), layers=1)
+    with pytest.raises(ValueError, match="finite"):
+        qaoa_statevector(ring(4), [float("nan")], [0.1])
+    with pytest.raises(ValueError, match="finite"):
+        bind_angles(qaoa_circuit(ring(4), layers=1), [float("inf")], [0.1])
+    with pytest.raises(ValueError, match="maxiter"):
+        optimize(ring(4), layers=1, maxiter=0)

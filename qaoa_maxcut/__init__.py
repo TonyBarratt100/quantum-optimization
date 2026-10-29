@@ -1,11 +1,13 @@
 """Solve MaxCut with QAOA in Qiskit."""
 
 from .graphs import (
+    OPTIMAL_RTOL,
     Graph,
     brute_force_max_cut,
     cut_value,
     cut_values,
     example_graph,
+    optimal_mask,
     random_graph,
     ring,
 )
@@ -22,6 +24,7 @@ from .qaoa import (
 )
 
 __all__ = [
+    "OPTIMAL_RTOL",
     "Graph",
     "QAOAResult",
     "best_sampled_cut",
@@ -31,6 +34,7 @@ __all__ = [
     "cut_values",
     "example_graph",
     "expected_cut",
+    "optimal_mask",
     "optimize",
     "qaoa_circuit",
     "qaoa_statevector",

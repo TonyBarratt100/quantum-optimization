@@ -11,6 +11,7 @@ from qaoa_maxcut.graphs import (
     cut_value,
     cut_values,
     example_graph,
+    optimal_mask,
     random_graph,
     ring,
 )
@@ -93,3 +94,36 @@ def test_example_graph_max_cut_is_seven():
 def test_random_graph_is_reproducible():
     assert random_graph(8, 0.5, seed=3) == random_graph(8, 0.5, seed=3)
     assert random_graph(5, 1.0).edges == Graph.from_edges(5, itertools.combinations(range(5), 2)).edges
+
+
+@pytest.mark.parametrize(
+    "edges",
+    [
+        [(0.9, 1.9)],  # would silently become edge (0, 1) if converted with int()
+        [(0, 1.0)],
+        [(True, 1)],
+        [("0", 1)],
+    ],
+)
+def test_node_labels_must_be_integers(edges):
+    with pytest.raises(ValueError, match="integers"):
+        Graph.from_edges(3, edges)
+
+
+def test_numpy_integer_labels_are_accepted():
+    graph = Graph.from_edges(np.int64(3), [(np.int64(0), np.int32(2))])
+    assert graph.edges == ((0, 2, 1.0),)
+
+
+def test_direct_construction_is_validated_too():
+    with pytest.raises(ValueError, match="num_nodes must be an integer"):
+        Graph(3.0, ())  # type: ignore[arg-type]
+    with pytest.raises(ValueError, match="integers"):
+        Graph(3, ((0.5, 1, 1.0),))  # type: ignore[arg-type]
+    with pytest.raises(ValueError, match="non-numeric weight"):
+        Graph(3, ((0, 1, "1"),))  # type: ignore[arg-type]
+
+
+def test_optimal_mask_absorbs_rounding_but_not_real_differences():
+    assert optimal_mask(np.array([0.1 + 0.2, 0.3]), 0.3).all()
+    assert optimal_mask(np.array([1.0, 1.000001]), 1.000001).tolist() == [False, True]

@@ -14,6 +14,7 @@ from __future__ import annotations
 import math
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
+from numbers import Integral, Real
 
 import numpy as np
 
@@ -21,6 +22,10 @@ Edge = tuple[int, int, float]
 
 #: Brute force and statevector simulation both cost 2**n, so keep n small.
 MAX_NODES = 20
+#: Cut values within this relative distance of the maximum count as optimal. It only
+#: absorbs floating-point rounding (e.g. 0.1 + 0.2 vs 0.3); genuinely different weights,
+#: even 1.0 vs 1.000001, are told apart.
+OPTIMAL_RTOL = 1e-9
 
 
 @dataclass(frozen=True)
@@ -31,10 +36,16 @@ class Graph:
     edges: tuple[Edge, ...]
 
     def __post_init__(self) -> None:
+        if not _is_integer(self.num_nodes):
+            raise ValueError(f"num_nodes must be an integer, got {self.num_nodes!r}")
         if not 1 <= self.num_nodes <= MAX_NODES:
             raise ValueError(f"num_nodes must be between 1 and {MAX_NODES}, got {self.num_nodes}")
         seen: set[frozenset[int]] = set()
         for i, j, weight in self.edges:
+            if not (_is_integer(i) and _is_integer(j)):
+                raise ValueError(f"node labels must be integers, got edge ({i!r}, {j!r})")
+            if isinstance(weight, bool) or not isinstance(weight, Real):
+                raise ValueError(f"edge ({i}, {j}) has a non-numeric weight {weight!r}")
             if not (0 <= i < self.num_nodes and 0 <= j < self.num_nodes):
                 raise ValueError(f"edge ({i}, {j}) refers to a node outside 0..{self.num_nodes - 1}")
             if i == j:
@@ -62,6 +73,11 @@ class Graph:
                 i, j, weight = edge
             else:
                 raise ValueError(f"edge must have 2 or 3 entries, got {edge!r}")
+            if not (_is_integer(i) and _is_integer(j)):
+                # Converting first would silently turn e.g. 0.9 into node 0
+                raise ValueError(f"node labels must be integers, got edge {edge!r}")
+            if isinstance(weight, bool) or not isinstance(weight, Real):
+                raise ValueError(f"weight must be a number, got {weight!r}")
             normalised.append((int(i), int(j), float(weight)))
         return cls(num_nodes, tuple(normalised))
 
@@ -137,3 +153,15 @@ def brute_force_max_cut(graph: Graph) -> tuple[float, list[int]]:
     values = cut_values(graph)
     best = int(np.argmax(values))
     return float(values[best]), assignment_from_index(best, graph.num_nodes)
+
+
+def optimal_mask(values: np.ndarray, max_cut: float, rtol: float = OPTIMAL_RTOL) -> np.ndarray:
+    """Which entries of ``values`` are maximum cuts, allowing only for rounding error."""
+    if not 0 <= rtol < 1e-3:
+        raise ValueError(f"rtol must be in [0, 1e-3), got {rtol}")
+    return values >= max_cut - rtol * abs(max_cut)
+
+
+def _is_integer(value: object) -> bool:
+    """True for Python and NumPy integers, but not for booleans or whole-number floats."""
+    return isinstance(value, Integral) and not isinstance(value, bool)
