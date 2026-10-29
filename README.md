@@ -104,6 +104,27 @@ the best cut in theory, but adds about 40 more two-qubit gates, and each gate ad
 On this device model depth still wins at p = 3, but by less than the exact simulation
 promises. A real chip may show the gains levelling off sooner.
 
+### Real hardware result
+
+One run on **ibm_fez**, 29 October 2026, 4,000 shots per circuit:
+
+| p | Two-qubit gates | P(max cut), exact | ibm_fez, readout-corrected | Share of the ideal kept |
+|---|---|---|---|---|
+| 1 | 31 | 0.401 | 0.351 | 88% |
+| **2** | **69** | **0.721** | **0.573** | 79% |
+| 3 | 111 | 0.933 | 0.548 | 59% |
+
+![QAOA measured on ibm_fez](docs/qaoa_ibm_fez.png)
+
+- **On the real chip, 3 layers did worse than 2.** Each layer helps in theory, but going
+  from 2 to 3 added about 40 two-qubit gates whose noise cost more than the extra layer
+  gained. The gap (0.573 vs 0.548) is about twice the shot noise: real, but modest, and
+  worth repeating.
+- **QAOA still clearly works.** A random guess finds a maximum cut 9% of the time; the chip
+  did 4 to 6 times better at every depth, and every depth found the maximum cut of 7.
+- **Here the noise is in the gates, not the readout.** Readout correction added only about
+  0.01-0.02. With 69-111 two-qubit gates, gate errors dominate.
+
 How it works:
 
 - **Readout correction.** Two calibration circuits, all |0> and all |1>, run in the same
